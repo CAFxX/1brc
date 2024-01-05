@@ -29,7 +29,7 @@ import java.util.TreeMap;
 import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
 
-public class CalculateAverage_spullara {
+public class CalculateAverage_cafxx {
     private static final String FILE = "./measurements.txt";
 
     /*
@@ -42,7 +42,6 @@ public class CalculateAverage_spullara {
      */
 
     public static void main(String[] args) throws IOException, ExecutionException, InterruptedException {
-        long start = System.currentTimeMillis();
         var filename = args.length == 0 ? FILE : args[0];
         var file = new File(filename);
 
@@ -83,7 +82,7 @@ public class CalculateAverage_spullara {
                         currentPosition++;
                     }
                     currentPosition++;
-                    resultMap.putOrMerge(buffer, 0, offset, temp / 10.0, hash);
+                    resultMap.putOrMerge(buffer, 0, offset, temp, hash);
                     bb.position(currentPosition);
                 }
                 return resultMap;
@@ -91,8 +90,10 @@ public class CalculateAverage_spullara {
             catch (IOException e) {
                 throw new RuntimeException(e);
             }
-        }).parallel().flatMap(partition -> partition.getAll().stream())
-                .collect(Collectors.toMap(e -> new String(e.key()), Entry::value, CalculateAverage_spullara::merge, TreeMap::new));
+        })
+                .parallel()
+                .flatMap(partition -> partition.getAll().stream())
+                .collect(Collectors.toMap(e -> new String(e.key()), Entry::value, CalculateAverage_cafxx::merge, TreeMap::new));
 
         System.out.println(resultsMap);
     }
@@ -124,11 +125,11 @@ public class CalculateAverage_spullara {
         return merge(v, value.min, value.max, value.sum, value.count);
     }
 
-    private static Result merge(Result v, double value, double value1, double value2, long value3) {
-        v.min = Math.min(v.min, value);
-        v.max = Math.max(v.max, value1);
-        v.sum += value2;
-        v.count += value3;
+    private static Result merge(Result v, int min, int max, long sum, int count) {
+        v.min = Math.min(v.min, min);
+        v.max = Math.max(v.max, max);
+        v.sum += sum;
+        v.count += count;
         return v;
     }
 
@@ -143,70 +144,68 @@ public class CalculateAverage_spullara {
         }
         return location;
     }
-}
 
-class Result {
-    double min, max, sum;
-    long count;
+    static class Result {
+        int min, max, count;
+        long sum;
 
-    Result(double value) {
-        min = max = sum = value;
-        this.count = 1;
-    }
-
-    @Override
-    public String toString() {
-        return round(min) + "/" + round(sum / count) + "/" + round(max);
-    }
-
-    double round(double v) {
-        return Math.round(v * 10.0) / 10.0;
-    }
-
-}
-
-    record Entry(byte[] key, Result value) {
-    }
-
-    record FileSegment(long start, long end) {
-    }
-
-class ByteArrayToResultMap {
-    public static final int MAPSIZE = 1024 * 128;
-    Result[] slots = new Result[MAPSIZE];
-    byte[][] keys = new byte[MAPSIZE][];
-
-    public void putOrMerge(byte[] key, int offset, int size, double temp, int hash) {
-        int slot = hash & (slots.length - 1);
-        var slotValue = slots[slot];
-        // Linear probe for open slot
-        while (slotValue != null && (keys[slot].length != size || !Arrays.equals(keys[slot], 0, size, key, offset, size))) {
-            slot = (slot + 1) & (slots.length - 1);
-            slotValue = slots[slot];
+        Result(int value) {
+            min = max = value;
+            sum = value;
+            count = 1;
         }
-        Result value = slotValue;
-        if (value == null) {
-            slots[slot] = new Result(temp);
-            byte[] bytes = new byte[size];
-            System.arraycopy(key, offset, bytes, 0, size);
-            keys[slot] = bytes;
-        } else {
-            value.min = Math.min(value.min, temp);
-            value.max = Math.max(value.max, temp);
-            value.sum += temp;
-            value.count += 1;
+
+        @Override
+        public String toString() {
+            return (min / 10.0) + "/" + (sum / (count * 10.0)) + "/" + (max / 10.0);
         }
+
     }
 
-    // Get all pairs
-    public List<Entry> getAll() {
-        List<Entry> result = new ArrayList<>(slots.length);
-        for (int i = 0; i < slots.length; i++) {
-            Result slotValue = slots[i];
-            if (slotValue != null) {
-                result.add(new Entry(keys[i], slotValue));
+    static record Entry(byte[] key, Result value) {
+    }
+
+    static record FileSegment(long start, long end) {
+    }
+
+    static class ByteArrayToResultMap {
+        public static final int MAPSIZE = 1024 * 128;
+        Result[] slots = new Result[MAPSIZE];
+        byte[][] keys = new byte[MAPSIZE][];
+
+        public void putOrMerge(byte[] key, int offset, int size, int temp, int hash) {
+            int slot = hash & (slots.length - 1);
+            var slotValue = slots[slot];
+            // Linear probe for open slot
+            while (slotValue != null && (keys[slot].length != size || !Arrays.equals(keys[slot], 0, size, key, offset, size))) {
+                slot = (slot + 1) & (slots.length - 1);
+                slotValue = slots[slot];
+            }
+            Result value = slotValue;
+            if (value == null) {
+                slots[slot] = new Result(temp);
+                byte[] bytes = new byte[size];
+                System.arraycopy(key, offset, bytes, 0, size);
+                keys[slot] = bytes;
+            }
+            else {
+                value.min = Math.min(value.min, temp);
+                value.max = Math.max(value.max, temp);
+                value.sum += temp;
+                value.count += 1;
             }
         }
-        return result;
+
+        // Get all pairs
+        public List<Entry> getAll() {
+            List<Entry> result = new ArrayList<>(slots.length);
+            for (int i = 0; i < slots.length; i++) {
+                Result slotValue = slots[i];
+                if (slotValue != null) {
+                    result.add(new Entry(keys[i], slotValue));
+                }
+            }
+            return result;
+        }
     }
 }
